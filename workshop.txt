@@ -1,4 +1,5 @@
 version=1
+id=3811767417
 title=Tien's Actionable Hotbar
 description=Choose what each hotbar slot does. Clicking a slot or pressing its number key normally equips the item; with this mod it can do any action from the item's own right-click menu instead.
 description=
