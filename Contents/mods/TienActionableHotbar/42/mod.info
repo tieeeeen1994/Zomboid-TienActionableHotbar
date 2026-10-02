@@ -1,0 +1,8 @@
+name=Tien's Actionable Hotbar
+id=TienActionableHotbar
+description=Choose what each hotbar slot does. Right-click an item on the hotbar, pick Change Default Action, and choose any action from its menu: swing a baseball bat with one hand, drink the whiskey on your webbing, take a painkiller. Set it for every item of that kind or for just that one. Works with mods that make more items attachable, such as Plysken Attachments Reborn.
+author=Tien
+poster=poster.png
+icon=icon.png
+modversion=0.1.0
+category=QoL

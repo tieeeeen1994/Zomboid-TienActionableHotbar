@@ -1,0 +1,13 @@
+{
+    "IGUI_TienActionableHotbar_ChangeDefault": "Change Default Action",
+    "IGUI_TienActionableHotbar_Every": "Every %1",
+    "IGUI_TienActionableHotbar_ThisOnly": "Only this %1",
+    "IGUI_TienActionableHotbar_GameDefault": "The game's usual action",
+    "IGUI_TienActionableHotbar_SameAsEvery": "Same as every %1",
+    "IGUI_TienActionableHotbar_NowGame": "Clicking this item's hotbar slot or pressing its key does the game's usual action. Pick any action from the item's menu to do instead.",
+    "IGUI_TienActionableHotbar_NowEvery": "Clicking this item's hotbar slot or pressing its key does: %1 (set for every %2).",
+    "IGUI_TienActionableHotbar_NowThis": "Clicking this item's hotbar slot or pressing its key does: %1 (set for this item only).",
+    "IGUI_TienActionableHotbar_Set": "Hotbar: %1",
+    "IGUI_TienActionableHotbar_SetGame": "Hotbar: the game's usual action",
+    "IGUI_TienActionableHotbar_CantNow": "Can't do that right now: %1"
+}
