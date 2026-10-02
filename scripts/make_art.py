@@ -9,11 +9,12 @@ Needs Pillow. Reads item icons from the local Project Zomboid install (media/tex
 """
 
 import io
+import math
 import os
 import re
 import struct
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -25,14 +26,15 @@ PZ = os.path.expanduser(
 PACKS = [os.path.join(PZ, "media", "texturepacks", name) for name in ("UI2.pack", "UI.pack")]
 FONT = "/System/Library/Fonts/Helvetica.ttc"
 
+UI = os.path.join(PZ, "media", "ui")
+
 SS = 4
-BG_TOP = (44, 46, 52)
-BG_BOTTOM = (14, 15, 18)
+GLOW = (78, 66, 48)
+DARK = (14, 14, 17)
 ACCENT = (255, 205, 80)
-BORDER = (204, 204, 204, 204)
-MENU_BG = (26, 26, 26, 235)
-MENU_HOVER = (80, 80, 80, 255)
-TEXT = (235, 235, 235, 255)
+BORDER = (204, 204, 204, 255)
+GOOD = (110, 176, 92)
+INK = (12, 12, 12, 255)
 
 _PACKS = {}
 
@@ -86,132 +88,176 @@ def item_icon(name):
     raise SystemExit("No icon named %s in UI2.pack or UI.pack" % name)
 
 
-def blend(a, b, t):
-    return tuple(round(x + (y - x) * t) for x, y in zip(a, b))
+def ui_image(name):
+    path = os.path.join(UI, name)
+    if not os.path.exists(path):
+        raise SystemExit("Missing game image: " + path)
+    return Image.open(path).convert("RGBA")
+
+
+def font(px, bold=False):
+    return ImageFont.truetype(FONT, max(6, round(px)), index=1 if bold else 0)
 
 
 def backdrop(size):
+    """Dark, with a warm glow behind the bottle."""
     img = Image.new("RGBA", (size, size))
-    d = ImageDraw.Draw(img)
+    px = img.load()
+    cx, cy, r = size * 0.5, size * 0.4, size * 0.62
     for y in range(size):
-        d.line([(0, y), (size, y)], fill=blend(BG_TOP, BG_BOTTOM, y / max(1, size - 1)) + (255,))
+        for x in range(size):
+            t = min(1.0, ((x - cx) ** 2 + (y - cy) ** 2) ** 0.5 / r)
+            t = t * t * (3 - 2 * t)
+            px[x, y] = tuple(round(a + (b - a) * t) for a, b in zip(GLOW, DARK)) + (255,)
     return img
 
 
-def font(px):
-    return ImageFont.truetype(FONT, max(6, round(px)))
+def dilate(alpha, px):
+    return alpha.filter(ImageFilter.MaxFilter(2 * px + 1)) if px > 0 else alpha
 
 
-def paste_icon(img, icon, box):
-    """Pixel art: whole-number nearest-neighbour scale, centred in box."""
-    x0, y0, x1, y1 = box
-    scale = max(1, int(min(x1 - x0, y1 - y0) * 0.8 // icon.width))
-    grown = icon.resize((icon.width * scale, icon.height * scale), Image.NEAREST)
-    img.alpha_composite(grown, (round((x0 + x1 - grown.width) / 2), round((y0 + y1 - grown.height) / 2)))
+def sticker(icon, scale, ring):
+    """Pixel art scaled by a whole number, with a thin dark line and then a white outline one art
+    pixel wide, stepped like the pixels (the series' sticker look)."""
+    art = icon.resize((icon.width * scale, icon.height * scale), Image.NEAREST)
+    pad = ring * 3
+    canvas = Image.new("RGBA", (art.width + pad * 2, art.height + pad * 2), (0, 0, 0, 0))
+    canvas.alpha_composite(art, (pad, pad))
+    alpha = canvas.getchannel("A").point(lambda a: 255 if a > 40 else 0)
+    out = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    white = Image.new("RGBA", canvas.size, (255, 255, 255, 255))
+    dark = max(1, ring // 3)
+    out.paste(white, (0, 0), dilate(alpha, ring + dark))
+    out.paste(Image.new("RGBA", canvas.size, INK), (0, 0), dilate(alpha, dark))
+    out.alpha_composite(canvas)
+    return out
 
 
-def slot(img, box, number, icon, hovered, k):
+def shadow(img, layer, at, blur, alpha, offset):
+    mask = layer.getchannel("A").point(lambda a: a * alpha // 255)
+    pad = blur * 3
+    sh = Image.new("RGBA", (layer.width + pad * 2, layer.height + pad * 2), (0, 0, 0, 0))
+    black = Image.new("RGBA", layer.size, (0, 0, 0, 255))
+    sh.paste(black, (pad, pad), mask)
+    sh = sh.filter(ImageFilter.GaussianBlur(blur))
+    img.alpha_composite(sh, (at[0] - pad + offset[0], at[1] - pad + offset[1]))
+
+
+def place(img, layer, centre):
+    at = (round(centre[0] - layer.width / 2), round(centre[1] - layer.height / 2))
+    img.alpha_composite(layer, at)
+    return at
+
+
+def slot(img, box, number, icon, k, lit=False):
+    """A hotbar slot as the game draws it: thin light border, the slot number top left."""
     layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
     d = ImageDraw.Draw(layer)
-    d.rectangle(box, fill=(0, 0, 0, 110))
-    if hovered:
-        d.rectangle(box, fill=(255, 255, 255, 50))
-    d.rectangle(box, outline=BORDER, width=max(1, round(2 * k)))
+    d.rectangle(box, fill=(255, 255, 255, 46) if lit else (0, 0, 0, 120))
+    d.rectangle(box, outline=ACCENT + (255,) if lit else BORDER, width=max(1, round(3 * k)))
     img.alpha_composite(layer)
-    paste_icon(img, icon, box)
-    ImageDraw.Draw(img).text((box[0] + round(6 * k), box[1] + round(3 * k)), number, font=font(20 * k), fill=TEXT)
+    if icon is not None:
+        scale = max(1, int((box[2] - box[0]) * 0.78 // icon.width))
+        art = icon.resize((icon.width * scale, icon.height * scale), Image.NEAREST)
+        place(img, art, ((box[0] + box[2]) / 2, (box[1] + box[3]) / 2))
+    ImageDraw.Draw(img).text((box[0] + round(8 * k), box[1] + round(4 * k)), number, font=font(24 * k),
+                             fill=(255, 255, 255, 255))
 
 
-def arrow(d, x, cy, k):
-    s = 5 * k
-    d.polygon([(x - s, cy - s), (x + s * 0.4, cy), (x - s, cy + s)], fill=TEXT)
-
-
-def check(d, x, cy, k):
-    w = max(2, round(3 * k))
-    d.line([(x, cy), (x + 5 * k, cy + 5 * k), (x + 13 * k, cy - 6 * k)], fill=ACCENT + (255,), width=w, joint="curve")
-
-
-def menu(img, x, y, w, rows, k, hover=None):
-    """rows: (text, has_submenu, checked). Drawn like the game's context menu."""
-    row_h = round(30 * k)
-    pad = round(6 * k)
-    h = row_h * len(rows) + pad * 2
-    layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    d = ImageDraw.Draw(layer)
-    d.rectangle([x, y, x + w, y + h], fill=MENU_BG, outline=(110, 110, 110, 255), width=max(1, round(2 * k)))
-    if hover is not None:
-        top = y + pad + hover * row_h
-        d.rectangle([x + round(3 * k), top, x + w - round(3 * k), top + row_h], fill=MENU_HOVER)
-    img.alpha_composite(layer)
+def keycap(size, label):
+    """A keyboard key, light grey with a darker base, the label in bold."""
+    w = size
+    h = round(size * 1.06)
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    f = font(17 * k)
-    for i, (text, sub, checked) in enumerate(rows):
-        cy = y + pad + i * row_h + row_h / 2
-        if checked:
-            check(d, x + round(8 * k), cy, k)
-        d.text((x + round(30 * k), cy), text, font=f, fill=TEXT, anchor="lm")
-        if sub:
-            arrow(d, x + w - round(14 * k), cy, k)
-    return [(x, y + pad + i * row_h, x + w, y + pad + (i + 1) * row_h) for i in range(len(rows))]
+    r = round(size * 0.18)
+    edge = max(2, round(size * 0.05))
+    d.rounded_rectangle([0, 0, w - 1, h - 1], radius=r, fill=INK)
+    d.rounded_rectangle([edge, edge, w - 1 - edge, h - 1 - edge], radius=r - edge, fill=(150, 150, 156, 255))
+    d.rounded_rectangle([edge * 2, edge * 1.6, w - 1 - edge * 2, h - 1 - edge * 3.6], radius=r - edge,
+                        fill=(232, 232, 236, 255))
+    d.text((w / 2, (h - edge * 2) / 2), label, font=font(size * 0.56, bold=True), fill=(40, 40, 44, 255), anchor="mm")
+    return img
+
+
+def moodle(size):
+    """The game's Thirst moodle on a good-moodle green background, ringed so it reads as a badge."""
+    bg = ui_image("Moodles/128/_Moodles_BGsolid.png")
+    tint = Image.new("RGBA", bg.size, GOOD + (255,))
+    disc = ImageChops.multiply(bg, tint)
+    disc.putalpha(bg.getchannel("A"))
+    glass = ui_image("Moodles/128/Status_Thirst.png")
+    disc.alpha_composite(glass)
+    disc = disc.resize((size, size), Image.LANCZOS)
+    ring = max(2, round(size * 0.045))
+    out = Image.new("RGBA", (size + ring * 4, size + ring * 4), (0, 0, 0, 0))
+    d = ImageDraw.Draw(out)
+    d.ellipse([0, 0, out.width - 1, out.height - 1], fill=(255, 255, 255, 255))
+    d.ellipse([ring, ring, out.width - 1 - ring, out.height - 1 - ring], fill=INK)
+    out.alpha_composite(disc, (ring * 2, ring * 2))
+    return out
 
 
 def poster(size):
-    """The hotbar with a baseball bat, whiskey and painkillers; the whiskey's right-click menu
-    is open on Change Default Action > Every Whiskey, with Drink > All ticked."""
     k = size / 512.0
     img = backdrop(size)
-    icons = [item_icon("Item_BaseballBat"), item_icon("Item_Whiskey"), item_icon("Item_PillsPainkiller")]
-    cell = round(112 * k)
-    pad = round(18 * k)
-    total = cell * 3 + pad * 2
-    left = (size - total) // 2
-    top = size - cell - round(40 * k)
-    bar = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    ImageDraw.Draw(bar).rectangle(
-        [left - pad, top - pad, left + total + pad, top + cell + pad],
-        fill=(0, 0, 0, 120), outline=BORDER, width=max(1, round(2 * k)))
-    img.alpha_composite(bar)
-    for i, icon in enumerate(icons):
-        x = left + i * (cell + pad)
-        slot(img, (x, top, x + cell, top + cell), str(i + 1), icon, i == 1, k)
+    bat = item_icon("Item_BaseballBat")
+    whiskey = item_icon("Item_Whiskey")
+    pills = item_icon("Item_PillsPainkiller")
 
-    root = menu(img, round(16 * k), round(40 * k), round(224 * k), [
-        ("Drink", True, False),
-        ("Rename", False, False),
-        ("Remove from Hotbar", False, False),
-        ("Change Default Action", True, False),
-    ], k, hover=3)
-    sub_x = root[3][2] - round(4 * k)
-    sub = menu(img, sub_x, root[3][1] - round(6 * k), round(212 * k), [
-        ("Every Whiskey", True, True),
-        ("Only this Whiskey", True, False),
-    ], k, hover=0)
-    menu(img, sub_x, sub[1][3] + round(14 * k), round(236 * k), [
-        ("The game's usual action", False, False),
-        ("Drink > All", False, True),
-        ("Drink > Half", False, False),
-        ("Drink > Quarter", False, False),
-    ], k, hover=1)
+    cell = round(128 * k)
+    gap = round(16 * k)
+    total = cell * 3 + gap * 2
+    left = (size - total) // 2
+    top = size - cell - round(34 * k)
+    bar = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    ImageDraw.Draw(bar).rectangle([left - gap, top - gap, left + total + gap, top + cell + gap],
+                                  fill=(0, 0, 0, 130), outline=BORDER, width=max(1, round(2 * k)))
+    img.alpha_composite(bar)
+    boxes = [(left + i * (cell + gap), top, left + i * (cell + gap) + cell, top + cell) for i in range(3)]
+    slot(img, boxes[0], "1", bat, k)
+    slot(img, boxes[1], "2", None, k, lit=True)
+    slot(img, boxes[2], "3", pills, k)
+
+    bottle = sticker(whiskey, max(1, round(7 * k)), max(1, round(7 * k)))
+    centre = (size / 2, round(178 * k))
+    at = (round(centre[0] - bottle.width / 2), round(centre[1] - bottle.height / 2))
+    shadow(img, bottle, at, max(2, round(10 * k)), 170, (round(10 * k), round(14 * k)))
+    img.alpha_composite(bottle, at)
+
+    d = ImageDraw.Draw(img)
+    s2 = boxes[1]
+    for dx in (-30, 0, 30):
+        x = (s2[0] + s2[2]) / 2 + dx * k
+        y0, y1 = s2[1] - round(10 * k), s2[1] - round((34 if dx else 46) * k)
+        d.line([(x, y0), (x, y1)], fill=(0, 0, 0, 200), width=max(2, round(10 * k)))
+        d.line([(x, y0), (x, y1)], fill=ACCENT + (255,), width=max(2, round(5 * k)))
+
+    key = keycap(round(92 * k), "2")
+    key_at = (at[0] - round(34 * k), at[1] + round(18 * k))
+    shadow(img, key, key_at, max(2, round(6 * k)), 160, (round(6 * k), round(8 * k)))
+    img.alpha_composite(key, key_at)
+
+    badge = moodle(round(104 * k))
+    badge_at = (at[0] + bottle.width - round(96 * k), at[1] + bottle.height - badge.height + round(14 * k))
+    shadow(img, badge, badge_at, max(2, round(6 * k)), 160, (round(6 * k), round(8 * k)))
+    img.alpha_composite(badge, badge_at)
     return img
 
 
 def icon(size):
-    """One hotbar slot holding whiskey, with a menu badge: the slot does what you picked."""
     big = size * SS
     k = big / 128.0
     img = backdrop(big)
-    m = round(10 * k)
-    slot(img, (m, m, big - m, big - m), "2", item_icon("Item_Whiskey"), False, k * 1.5)
-    r = round(26 * k)
-    cx, cy = big - m - r + round(4 * k), big - m - r + round(4 * k)
-    d = ImageDraw.Draw(img)
-    d.ellipse([cx - r - round(3 * k), cy - r - round(3 * k), cx + r + round(3 * k), cy + r + round(3 * k)], fill=(12, 12, 12, 255))
-    d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=ACCENT + (255,))
-    w = round(5 * k)
-    for dy in (-9, 0, 9):
-        yy = cy + round(dy * k)
-        d.line([(cx - round(11 * k), yy), (cx + round(11 * k), yy)], fill=(12, 12, 12, 255), width=w)
+    bottle = sticker(item_icon("Item_Whiskey"), round(3 * k), round(1.2 * k))
+    centre = (big * 0.47, big * 0.5)
+    at = (round(centre[0] - bottle.width / 2), round(centre[1] - bottle.height / 2))
+    shadow(img, bottle, at, round(3 * k), 160, (round(2 * k), round(3 * k)))
+    img.alpha_composite(bottle, at)
+    key = keycap(round(40 * k), "2")
+    img.alpha_composite(key, (round(6 * k), round(6 * k)))
+    badge = moodle(round(46 * k))
+    img.alpha_composite(badge, (big - badge.width - round(5 * k), big - badge.height - round(5 * k)))
     return img.resize((size, size), Image.LANCZOS)
 
 

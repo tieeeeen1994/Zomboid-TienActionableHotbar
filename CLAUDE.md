@@ -64,9 +64,14 @@ First implementation (2026-10-02), not yet run in game. Only checked with luapar
     option drops its icon because `ISContextMenu:render` draws the tick where the icon goes. Works in the hotbar's
     right-click and in the inventory window's (the item is on the hotbar there too).
 - Translations: `shared/Translate/EN/IG_UI.json` (`IGUI_TienActionableHotbar_*`).
-- `scripts/make_art.py`: icon (a hotbar slot with whiskey and a menu badge), poster / preview (the hotbar with bat,
-  whiskey, painkillers and the menu open). Item icons come from the game's packs: B42 ones (Item_Whiskey) in
-  `UI2.pack`, older ones (Item_BaseballBat, Item_PillsPainkiller) only in `UI.pack`; same entry format.
+- `scripts/make_art.py`: no text, in the series' sticker style (pixel art scaled by whole numbers, thin dark line +
+  white outline one art pixel wide, soft shadow, warm glow on dark). Poster / preview: the whiskey rising out of the
+  lit slot 2 of a vanilla-looking hotbar (bat in 1, painkillers in 3), a drawn "2" key cap at its top left and the
+  game's Thirst moodle (`Moodles/128/Status_Thirst.png` on `_Moodles_BGsolid.png` tinted good-green) as a badge at
+  its bottom right: press 2, drink. Icon: the same bottle, key cap and badge. A first version showed a mock context
+  menu with text; the user asked for a better picture. Item icons come from the game's packs: B42 ones
+  (Item_Whiskey) in `UI2.pack`, older ones (Item_BaseballBat, Item_PillsPainkiller) only in `UI.pack`; same entry
+  format.
 
 ## To verify in game
 
